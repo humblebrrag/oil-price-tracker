@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import PriceChart from "./components/PriceChart";
+
+interface HistoryPoint {
+  date: string;
+  price: number;
+  time: number;
+}
 
 // --- Types ---
 type PriceZone =
@@ -138,6 +145,7 @@ export default function Dashboard() {
   const [headlines, setHeadlines] = useState<NewsHeadline[]>([]);
   const [newsError, setNewsError] = useState<string | null>(null);
   const [polymarketOdds, setPolymarketOdds] = useState<MarketOddsRow[]>([]);
+  const [chartHistory, setChartHistory] = useState<HistoryPoint[]>([]);
   // draftPositions: what user types in inputs. positions: committed values used for calculations.
   const [draftPositions, setDraftPositions] = useState<Record<string, PositionInput>>(DEFAULT_POSITIONS);
   const [positions, setPositions] = useState<Record<string, PositionInput>>(DEFAULT_POSITIONS);
@@ -235,64 +243,88 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch chart history (once, then every 5 min)
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch("/api/price/history");
+        const data = await res.json();
+        if (data.data?.length) setChartHistory(data.data);
+      } catch {}
+    };
+    fetchHistory();
+    const interval = setInterval(fetchHistory, 300000);
+    return () => clearInterval(interval);
+  }, []);
+
   const zone = price != null ? getPriceZone(price) : null;
   const trade = price != null ? getTradeAction(price) : null;
 
   return (
-    <main className="min-h-screen p-6 max-w-5xl mx-auto">
-      {/* Header: Title + Live Price */}
-      <header className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-          OIL PRICE PREDICTION MARKET TRACKER
-        </h1>
-        <div className="flex items-baseline gap-2">
-          <span className="text-terminal-muted text-sm uppercase">WTI / CL</span>
-          {price != null ? (
-            <span className="text-3xl font-bold text-terminal-success tabular-nums">
-              ${price.toFixed(2)}
-            </span>
-          ) : (
-            <span className="text-terminal-muted">
-              {priceError || "Loading..."}
-            </span>
-          )}
+    <main className="min-h-screen bg-terminal-bg">
+      {/* Header */}
+      <header className="border-b border-terminal-border bg-terminal-surface/50">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+              OIL PRICE PREDICTION MARKET TRACKER
+            </h1>
+            <div className="flex items-center gap-3">
+              <span className="text-terminal-muted text-xs uppercase tracking-wider">WTI / CL</span>
+              {price != null ? (
+                <span className="text-2xl sm:text-3xl font-bold text-terminal-success tabular-nums">
+                  ${price.toFixed(2)}
+                </span>
+              ) : (
+                <span className="text-terminal-muted text-sm">{priceError || "Loading..."}</span>
+              )}
+            </div>
+          </div>
         </div>
       </header>
 
-      {/* Trade Action Card - Big highlighted */}
-      {trade && (
-        <section className="mb-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      {/* Price Chart */}
+      <section className="rounded-xl border border-terminal-border bg-terminal-surface overflow-hidden shadow-lg">
+        <div className="px-4 py-3 border-b border-terminal-border flex items-center justify-between">
+          <h2 className="font-semibold text-white">WTI Crude Oil — 30 Day</h2>
+          <span className="text-terminal-muted text-xs">Front-month futures (CL)</span>
+        </div>
+        <div className="p-4">
+          <PriceChart data={chartHistory} currentPrice={price} />
+        </div>
+      </section>
+
+      {/* Trade Action + Zone — 2-col */}
+      <div className="grid sm:grid-cols-2 gap-4">
+        {trade && (
           <div
-            className={`rounded-xl border-2 ${trade.color} bg-terminal-surface p-6 flex items-center justify-between`}
+            className={`rounded-xl border-2 ${trade.color} bg-terminal-surface p-5 flex items-center justify-between shadow-md`}
           >
-            <span className="text-terminal-muted uppercase text-sm font-medium">
+            <span className="text-terminal-muted uppercase text-xs font-medium tracking-wider">
               Recommended Action
             </span>
-            <span className="text-xl sm:text-2xl font-bold text-white">
+            <span className="text-lg sm:text-xl font-bold text-white">
               {trade.action}
             </span>
           </div>
-        </section>
-      )}
-
-      {/* Price Zone Indicator */}
-      {zone && (
-        <section className="mb-8">
-          <div className="rounded-lg bg-terminal-surface border border-terminal-border p-4">
-            <span className="text-terminal-muted uppercase text-sm">Zone</span>
+        )}
+        {zone && (
+          <div className="rounded-xl border border-terminal-border bg-terminal-surface p-5 shadow-md">
+            <span className="text-terminal-muted uppercase text-xs tracking-wider">Zone</span>
             <p className={`text-lg font-semibold mt-1 ${zone.color}`}>
               {zone.zone}
             </p>
           </div>
-        </section>
-      )}
+        )}
+      </div>
 
       {/* POLYMARKET ODDS TRACKER */}
-      <section className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4 uppercase tracking-tight">
+      <section>
+        <h2 className="text-sm font-semibold text-terminal-muted uppercase tracking-wider mb-3">
           Polymarket Odds Tracker
         </h2>
-        <div className="rounded-lg bg-terminal-surface border border-terminal-border overflow-hidden">
+        <div className="rounded-xl bg-terminal-surface border border-terminal-border overflow-hidden shadow-md">
           <div className="px-4 py-3 border-b border-terminal-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <h3 className="font-semibold text-white">Market Odds</h3>
             <p className="text-xs text-terminal-muted">
@@ -383,7 +415,7 @@ export default function Dashboard() {
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* News Feed */}
-        <section className="rounded-lg bg-terminal-surface border border-terminal-border overflow-hidden">
+        <section className="rounded-xl bg-terminal-surface border border-terminal-border overflow-hidden shadow-md">
           <div className="px-4 py-3 border-b border-terminal-border">
             <h2 className="font-semibold text-white">News Feed</h2>
             <p className="text-xs text-terminal-muted">
@@ -412,8 +444,8 @@ export default function Dashboard() {
           </ul>
         </section>
 
-        {/* Position Tracker — Editable inputs + Update button + Portfolio value + Net outcomes */}
-        <section className="rounded-lg bg-terminal-surface border border-terminal-border overflow-hidden">
+        {/* Position Tracker */}
+        <section className="rounded-xl bg-terminal-surface border border-terminal-border overflow-hidden shadow-md">
           <div className="px-4 py-3 border-b border-terminal-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h2 className="font-semibold text-white">Position Tracker</h2>
@@ -560,9 +592,10 @@ export default function Dashboard() {
       </div>
 
       {/* Footer */}
-      <footer className="mt-8 text-center text-terminal-muted text-xs">
-        Data: TwelveData (price) · Reuters (news) · Polymarket (odds) · Updates: price 5s, news 60s, odds 30s
+      <footer className="mt-8 pt-6 border-t border-terminal-border text-center text-terminal-muted text-xs">
+        Data: TwelveData · Reuters · Polymarket · Oil Price API · Chart refresh 5m
       </footer>
+      </div>
     </main>
   );
 }
