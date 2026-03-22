@@ -1,11 +1,9 @@
 /**
- * API Route: Fetch historical WTI price data for chart
- * Returns last 30 days. Uses TwelveData, Alpha Vantage, or fallback.
+ * API Route: Historical WTI price data for chart (CL=F front-month futures)
+ * Single source: Yahoo Finance — same as /api/price for consistency
  */
 
-const TWELVE_DATA_TS = "https://api.twelvedata.com/time_series";
-const ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query";
-const DAYS = 30;
+const YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/CL=F";
 
 export interface HistoryPoint {
   date: string;
@@ -13,86 +11,96 @@ export interface HistoryPoint {
   time: number;
 }
 
-async function fetchTwelveDataHistory(apiKey: string): Promise<HistoryPoint[] | null> {
-  try {
-    const url = `${TWELVE_DATA_TS}?symbol=CL&interval=1day&outputsize=${DAYS}&apikey=${apiKey}`;
-    const res = await fetch(url, { next: { revalidate: 3600 } });
-    const data = await res.json();
-    const values = data?.values;
-    if (!Array.isArray(values) || values.length === 0) return null;
-    return values
-      .map((v: { datetime: string; close: string }) => ({
-        date: v.datetime.split(" ")[0],
-        price: parseFloat(v.close),
-        time: new Date(v.datetime).getTime(),
-      }))
-      .filter((p: HistoryPoint) => !isNaN(p.price))
-      .sort((a: HistoryPoint, b: HistoryPoint) => a.time - b.time);
-  } catch {}
-  return null;
-}
-
-async function fetchAlphaVantageHistory(apiKey: string): Promise<HistoryPoint[] | null> {
-  if (!apiKey || apiKey === "demo") return null;
-  try {
-    const url = `${ALPHA_VANTAGE_URL}?function=WTI&interval=daily&apikey=${apiKey}`;
-    const res = await fetch(url, { next: { revalidate: 3600 } });
-    const data = await res.json();
-    if (data["Information"]) return null;
-    const dataKey = Object.keys(data).find((k) => k.toLowerCase().startsWith("data"));
-    if (!dataKey || !Array.isArray(data[dataKey])) return null;
-    const arr = data[dataKey].slice(0, DAYS);
-    return arr
-      .map((v: { date: string; value: string }) => ({
-        date: v.date,
-        price: parseFloat(v.value),
-        time: new Date(v.date).getTime(),
-      }))
-      .filter((p: HistoryPoint) => !isNaN(p.price))
-      .sort((a: HistoryPoint, b: HistoryPoint) => a.time - b.time);
-  } catch {}
-  return null;
-}
-
-function generateFallbackHistory(currentPrice: number): HistoryPoint[] {
-  const points: HistoryPoint[] = [];
-  let p = currentPrice - 2;
-  for (let i = DAYS; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    p += (Math.random() - 0.48) * 1.5;
-    p = Math.max(70, Math.min(120, p));
-    points.push({
-      date: d.toISOString().split("T")[0],
-      price: Math.round(p * 100) / 100,
-      time: d.getTime(),
-    });
-  }
-  return points;
-}
-
 export async function GET() {
-  const twelveKey = process.env.TWELVE_DATA_API_KEY || process.env.NEXT_PUBLIC_TWELVE_DATA_API_KEY;
-  const alphaKey = process.env.ALPHA_VANTAGE_API_KEY;
-
   try {
-    if (twelveKey) {
-      const hist = await fetchTwelveDataHistory(twelveKey);
-      if (hist?.length) {
-        return Response.json({ success: true, data: hist });
-      }
+    const url = `${YAHOO_CHART}?range=1mo&interval=1d`;
+    const res = await fetch(url, {
+      next: { revalidate: 3600 },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; OilTracker/1.0)" },
+    });
+    const json = await res.json();
+
+    const result = json?.chart?.result?.[0];
+    if (!result) {
+      console.error("History API: No result in Yahoo response", json?.chart?.error);
+      return Response.json(
+        { success: false, error: "No chart data from Yahoo Finance" },
+        { status: 503 }
+      );
     }
-    if (alphaKey) {
-      const hist = await fetchAlphaVantageHistory(alphaKey);
-      if (hist?.length) {
-        return Response.json({ success: true, data: hist });
-      }
+
+    const timestamps = result.timestamp;
+    const quotes = result.indicators?.quote?.[0];
+    const closes = quotes?.close;
+    const currentPrice = result.meta?.regularMarketPrice;
+
+    if (
+      !Array.isArray(timestamps) ||
+      !Array.isArray(closes) ||
+      timestamps.length !== closes.length
+    ) {
+      console.error("History API: Invalid chart structure", {
+        tsLen: timestamps?.length,
+        closeLen: closes?.length,
+      });
+      return Response.json(
+        { success: false, error: "Invalid chart structure from Yahoo Finance" },
+        { status: 503 }
+      );
     }
-    const fallback = generateFallbackHistory(85);
-    return Response.json({ success: true, data: fallback, note: "Simulated data" });
+
+    const data: HistoryPoint[] = [];
+    for (let i = 0; i < timestamps.length; i++) {
+      const close = closes[i];
+      if (close == null || typeof close !== "number" || close <= 0) continue;
+      const ts = timestamps[i] * 1000;
+      const d = new Date(ts);
+      data.push({
+        date: d.toISOString().split("T")[0],
+        price: Math.round(close * 100) / 100,
+        time: ts,
+      });
+    }
+
+    if (data.length === 0) {
+      return Response.json(
+        { success: false, error: "No valid price points from Yahoo Finance" },
+        { status: 503 }
+      );
+    }
+
+    // Sort by time ascending
+    data.sort((a, b) => a.time - b.time);
+
+    const latestChartPrice = data[data.length - 1]?.price ?? 0;
+    const diff = currentPrice != null ? Math.abs(latestChartPrice - currentPrice) : 0;
+
+    console.log(
+      "[History API] latestChartPrice:",
+      latestChartPrice.toFixed(2),
+      "| meta.regularMarketPrice:",
+      currentPrice?.toFixed(2),
+      "| diff:",
+      diff.toFixed(2)
+    );
+
+    if (currentPrice != null && diff > 5) {
+      console.warn(
+        "[History API] Validation: chart price differs from current by >$5, data may be stale"
+      );
+    }
+
+    return Response.json({
+      success: true,
+      data,
+      source: "Yahoo Finance",
+      currentPrice: currentPrice ?? undefined,
+    });
   } catch (error) {
     console.error("Price history API error:", error);
-    const fallback = generateFallbackHistory(85);
-    return Response.json({ success: true, data: fallback, note: "Fallback" });
+    return Response.json(
+      { success: false, error: "Network error fetching chart data" },
+      { status: 500 }
+    );
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import PriceChart from "./components/PriceChart";
 
 interface HistoryPoint {
@@ -243,19 +243,35 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch chart history (once, then every 5 min)
+  // Fetch chart history — same source (Yahoo CL=F) as header price for consistency
+  const fetchHistory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/price/history");
+      const data = await res.json();
+      if (data.data?.length) setChartHistory(data.data);
+    } catch {}
+  }, []);
+
   useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const res = await fetch("/api/price/history");
-        const data = await res.json();
-        if (data.data?.length) setChartHistory(data.data);
-      } catch {}
-    };
     fetchHistory();
     const interval = setInterval(fetchHistory, 300000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchHistory]);
+
+  // Validation: if chart's last price differs from header by >$5, discard and refetch
+  useEffect(() => {
+    if (price == null || chartHistory.length === 0) return;
+    const lastChartPrice = chartHistory[chartHistory.length - 1]?.price ?? 0;
+    const diff = Math.abs(lastChartPrice - price);
+    if (diff > 5) {
+      console.warn("[Dashboard] Chart vs price diff >$5, refetching history", {
+        lastChartPrice,
+        headerPrice: price,
+        diff,
+      });
+      fetchHistory();
+    }
+  }, [price, chartHistory, fetchHistory]);
 
   const zone = price != null ? getPriceZone(price) : null;
   const trade = price != null ? getTradeAction(price) : null;
@@ -593,7 +609,7 @@ export default function Dashboard() {
 
       {/* Footer */}
       <footer className="mt-8 pt-6 border-t border-terminal-border text-center text-terminal-muted text-xs">
-        Data: TwelveData · Reuters · Polymarket · Oil Price API · Chart refresh 5m
+        Data: Yahoo Finance (CL=F) · Reuters · Polymarket · Chart refresh 5m
       </footer>
       </div>
     </main>
