@@ -27,17 +27,25 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### API Keys (Optional)
+### API Keys (Required for Live Price)
 
-For production, add a TwelveData API key to avoid rate limits:
+The dashboard needs a valid API key to show the WTI crude oil price (TwelveData demo key does not work).
 
-1. Sign up at [twelvedata.com](https://twelvedata.com)
-2. Create `.env.local` with:
+**Option 1: TwelveData** (recommended)
+1. Sign up at [twelvedata.com](https://twelvedata.com) (free tier available)
+2. Create `.env.local`:
    ```
    TWELVE_DATA_API_KEY=your_api_key
    ```
 
-The app works with the demo key but may show simulated prices under heavy use.
+**Option 2: Alpha Vantage**
+1. Sign up at [alphavantage.co](https://www.alphavantage.co/support/#api-key)
+2. Add to `.env.local`:
+   ```
+   ALPHA_VANTAGE_API_KEY=your_api_key
+   ```
+
+Price source: WTI Crude Oil front-month futures (CL), aligned with Polymarket CME resolution.
 
 ## Deploy on Vercel
 
@@ -45,7 +53,7 @@ The app works with the demo key but may show simulated prices under heavy use.
 2. Go to [vercel.com](https://vercel.com) and sign in with your Git provider.
 3. Click **Add New Project** and import your repository.
 4. Vercel will auto-detect Next.js — keep defaults and click **Deploy**.
-5. Optional: Add `TWELVE_DATA_API_KEY` under Project → Settings → Environment Variables.
+5. Add `TWELVE_DATA_API_KEY` or `ALPHA_VANTAGE_API_KEY` under Project → Settings → Environment Variables (required for live price).
 
 Your app will be live at `https://your-project.vercel.app`.
 
